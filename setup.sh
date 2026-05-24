@@ -1,13 +1,16 @@
 #!/bin/bash
 # setup.sh - one-shot provisioning for the agent-app exercise
 # Run as root from the directory containing agent-app + monitor.sh + report.sh + log_retention.sh:
-#   sudo bash setup.sh ./agent-app
+#   With sudo:     sudo bash setup.sh ./agent-app-linux-x86
+#   Already root:  bash setup.sh ./agent-app-linux-x86
 # Re-running is idempotent: safe on a partially-set-up box.
 
 set -euo pipefail
 
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
-  echo "[ERROR] must run as root: sudo bash setup.sh [path/to/agent-app]" >&2
+  echo "[ERROR] must run as root." >&2
+  echo "        If sudo is available:  sudo bash setup.sh [path/to/agent-app]" >&2
+  echo "        If you ARE root (e.g., container shell), just: bash setup.sh [path/to/agent-app]" >&2
   exit 1
 fi
 
@@ -130,13 +133,19 @@ setfacl    -m g:${CORE_GRP}:rwX   "$LOG_DIR"
 setfacl -d -m g:${CORE_GRP}:rwX   "$LOG_DIR"
 
 # ---------- 8. API key file ----------
-step "8. API key: ${AGENT_HOME}/api_keys/t_secret.key"
-KEY="${AGENT_HOME}/api_keys/t_secret.key"
+# The agent-app-linux binary expects AGENT_KEY_PATH to be the *directory* and
+# the key file to be named 'secret.key' (no 't_' prefix). Earlier builds used
+# 't_secret.key'; keep that around as a compat symlink so monitor scripts that
+# refer to either name keep working.
+step "8. API key: ${AGENT_HOME}/api_keys/secret.key"
+KEY="${AGENT_HOME}/api_keys/secret.key"
 if [ ! -s "$KEY" ]; then
   printf 'agent_api_key_test\n' > "$KEY"
 fi
 chown "$ADMIN_USER:$CORE_GRP" "$KEY"
 chmod 640 "$KEY"
+# Compat: keep t_secret.key pointing at secret.key
+ln -sf secret.key "${AGENT_HOME}/api_keys/t_secret.key" 2>/dev/null || true
 
 # ---------- 9. Application binary ----------
 step "9. Application binary: ${APP_BIN_SRC} -> ${AGENT_HOME}/agent-app"
@@ -154,7 +163,7 @@ cat > "$PROFILE" <<EOF
 export AGENT_HOME="${AGENT_HOME}"
 export AGENT_PORT="${APP_PORT}"
 export AGENT_UPLOAD_DIR="\${AGENT_HOME}/upload_files"
-export AGENT_KEY_PATH="\${AGENT_HOME}/api_keys/t_secret.key"
+export AGENT_KEY_PATH="\${AGENT_HOME}/api_keys"
 export AGENT_LOG_DIR="${LOG_DIR}"
 EOF
 chmod 644 "$PROFILE"
@@ -185,16 +194,17 @@ CRON_CMD="* * * * * AGENT_HOME=${AGENT_HOME} AGENT_PORT=${APP_PORT} AGENT_LOG_DI
 crontab -u "$ADMIN_USER" -l
 
 # ---------- Summary ----------
-step "Done. Quick verification commands:"
+step "Done. Quick verification commands (no sudo needed — you're root):"
 cat <<EOF
   ss -tulnp | grep -E ':(${SSH_PORT}|${APP_PORT})\b'
   ufw status
   id ${ADMIN_USER} ; id ${DEV_USER} ; id ${TEST_USER}
   ls -ld ${AGENT_HOME} ${AGENT_HOME}/upload_files ${AGENT_HOME}/api_keys ${LOG_DIR}
   getfacl ${AGENT_HOME}/api_keys ${LOG_DIR}
-  sudo -iu ${ADMIN_USER} bash -lc 'cd \$AGENT_HOME && ./agent-app'      # in another shell
-  sudo -u  ${ADMIN_USER} crontab -l
-  sudo tail -f ${LOG_DIR}/monitor.log
+  su - ${ADMIN_USER} -c 'cd \$AGENT_HOME && ./agent-app'              # boot the app (in another shell)
+  crontab -u ${ADMIN_USER} -l                                          # list cron rule
+  tail -f ${LOG_DIR}/monitor.log                                       # watch log accumulate
+  su - ${TEST_USER} -c 'ls ${AGENT_HOME}/api_keys' ; echo "exit=\$?"   # negative check: should be denied
 
 Reconnect over SSH on port ${SSH_PORT} (the old port is now blocked):
   ssh -p ${SSH_PORT} ${ADMIN_USER}@<host>
