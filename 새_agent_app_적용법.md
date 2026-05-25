@@ -43,45 +43,82 @@ setup.sh 가 이미 위 3가지를 모두 반영하도록 패치되었습니다 
 
 ---
 
-## 3. 적용 절차 — 한 번에 (clean 환경)
+## 3. 적용 절차 — 교육장 PC (Docker 컨테이너) 기준
 
-리눅스 서버/VM/컨테이너의 임의 디렉토리에서:
+교육장 PC 는 일반 사용자 계정(sudo 없음)이므로, **호스트는 Docker 명령만 쓰고 미션은 컨테이너 안에서** 진행합니다.
+
+### 3-A. 호스트 (Windows/macOS, sudo 불필요)
+
+```powershell
+cd C:\WorkSpace_2026\Codyssey_B_1_1     # 프로젝트 폴더
+
+# 1) zip 풀고 본인 아키텍처의 바이너리만 같은 폴더에
+Expand-Archive 'C:\Users\…\Downloads\agent-app.zip' .\_zip -Force
+Copy-Item .\_zip\agent-app-linux-x86 .          # 또는 -arm64
+
+# 2) Ubuntu 24.04 컨테이너 띄우기 (한 번만)
+docker pull ubuntu:24.04
+docker run -d --name codyssey --privileged --cgroupns=host `
+  --tmpfs /tmp:exec --tmpfs /run --tmpfs /run/lock `
+  -v /sys/fs/cgroup:/sys/fs/cgroup:rw `
+  -p 20022:20022 -p 15034:15034 `
+  ubuntu:24.04 sleep infinity
+
+# 3) 컨테이너 안 deps 설치 + 데몬 기동
+docker exec codyssey bash -c '
+  apt-get update && apt-get install -y --no-install-recommends \
+    openssh-server ufw cron acl dos2unix iproute2 procps psmisc ca-certificates curl
+  mkdir -p /run/sshd /root/work
+  service ssh start ; service cron start
+'
+
+# 4) 파일들 docker cp 로 컨테이너 안으로
+docker cp .\monitor.sh         codyssey:/root/work/
+docker cp .\report.sh          codyssey:/root/work/
+docker cp .\log_retention.sh   codyssey:/root/work/
+docker cp .\setup.sh           codyssey:/root/work/
+docker cp .\agent-app-linux-x86 codyssey:/root/work/
+
+# 5) 라인엔딩 + 실행 비트 정리
+docker exec codyssey bash -c 'cd /root/work && dos2unix *.sh && chmod +x *.sh agent-app-linux-x86'
+```
+
+### 3-B. 컨테이너 안 (root 셸 — sudo 무관)
 
 ```bash
-# 0) 작업 디렉토리 준비
-mkdir -p ~/agent && cd ~/agent
+docker exec -it codyssey bash
+cd /root/work
 
-# 1) 다운받은 zip 풀고, 본인 아키텍처의 바이너리만 가져오기
-unzip ~/Downloads/agent-app.zip
-cp agent-app-linux-x86 .            # 또는 agent-app-linux-arm64
-rm -rf __MACOSX
+# 1) 일괄 프로비저닝 (setup.sh 가 받은 첫 인자를 ${AGENT_HOME}/agent-app 으로 install)
+bash setup.sh ./agent-app-linux-x86
 
-# 2) 본 프로젝트의 스크립트들도 같은 폴더에
-cp ~/codyssey/setup.sh ~/codyssey/monitor.sh ~/codyssey/report.sh ~/codyssey/log_retention.sh .
-
-# 3) Windows에서 옮겨왔다면 CRLF 정리
-sudo apt-get install -y dos2unix
-dos2unix *.sh
-chmod +x *.sh agent-app-linux-x86
-
-# 4) 일괄 프로비저닝 — setup.sh 가 받은 첫 인자를
-#    자동으로 ${AGENT_HOME}/agent-app 으로 install 합니다
-sudo bash setup.sh ./agent-app-linux-x86
-
-# 5) 새 SSH 포트로 재접속 검증
-exit
-ssh -p 20022 agent-admin@<host>
-
-# 6) 앱 기동 (별도 터미널에서)
-sudo -iu agent-admin bash -lc 'cd $AGENT_HOME && ./agent-app'
+# 2) 앱 기동 (백그라운드)
+su - agent-admin -c 'cd $AGENT_HOME && ./agent-app' &
+sleep 4
 # >>> Starting Agent Boot Sequence...
-# [1/5] ~ [5/5] 모두 [OK]
-# All Boot Checks Passed!
-# Agent READY            ← 여기 보이면 성공
+# [1/5] ~ [5/5] 모두 [OK] + Agent READY     ← 여기 보이면 성공
 
-# 7) 모니터 수동 1회 + cron 누적 확인
-$AGENT_HOME/bin/monitor.sh
+# 3) monitor 수동 1회 + cron 누적 확인
+su - agent-admin -c '/home/agent-admin/agent-app/bin/monitor.sh'
 sleep 70 && tail -3 /var/log/agent-app/monitor.log
+
+# 4) 검증
+crontab -u agent-admin -l                    # cron 룰
+ss -tulnp | grep -E ':(20022|15034)\b'       # 두 포트만 LISTEN
+ufw status                                   # 방화벽 활성
+
+exit   # 컨테이너 셸 나오기
+```
+
+### 3-C. 산출물 회수 + 정리
+
+```powershell
+# 컨테이너 안 로그/증거를 호스트로 회수
+docker exec codyssey crontab -u agent-admin -l        > evidence\09-cron.txt
+docker exec codyssey cat /var/log/agent-app/monitor.log > evidence\monitor.log
+
+# 작업 끝나면 정리
+docker stop codyssey ; docker rm codyssey
 ```
 
 ### 핵심 포인트 — `setup.sh` 인자
@@ -93,29 +130,28 @@ sleep 70 && tail -3 /var/log/agent-app/monitor.log
 
 ## 4. 이미 setup.sh 를 한 번 돌린 상태에서 새 바이너리로 갈아끼우기
 
-이전 바이너리로 한 번 설치했고 그 위에 새 바이너리를 덮어쓰는 경우:
+이전 바이너리로 한 번 설치했고 그 위에 새 바이너리를 덮어쓰는 경우 (컨테이너 안 root 셸에서, sudo 무관):
 
 ```bash
-# (1) 새 바이너리 교체
-sudo install -o agent-admin -g agent-core -m 750 \
-  ./agent-app-linux-x86 \
+# (1) 새 바이너리 docker cp 로 컨테이너 안에 가져온 뒤
+docker cp ./agent-app-linux-x86 codyssey:/root/agent-app-linux-x86
+docker exec -it codyssey bash    # 컨테이너 진입
+
+# (2) 새 바이너리 교체 (sudo 없이 — 이미 root)
+install -o agent-admin -g agent-core -m 750 \
+  /root/agent-app-linux-x86 \
   /home/agent-admin/agent-app/agent-app
 
-# (2) 키 파일 이름 변경 (t_secret.key -> secret.key)
-sudo mv /home/agent-admin/agent-app/api_keys/t_secret.key \
-        /home/agent-admin/agent-app/api_keys/secret.key
-# (호환 심볼릭 링크는 선택)
-sudo ln -sf secret.key /home/agent-admin/agent-app/api_keys/t_secret.key
+# (3) 키 파일 이름 변경 (t_secret.key -> secret.key)
+mv /home/agent-admin/agent-app/api_keys/t_secret.key \
+   /home/agent-admin/agent-app/api_keys/secret.key
+ln -sf secret.key /home/agent-admin/agent-app/api_keys/t_secret.key  # 호환 심볼릭 링크
 
-# (3) AGENT_KEY_PATH 를 디렉토리로 변경
-sudo sed -i 's|/api_keys/t_secret.key|/api_keys|' /etc/profile.d/agent-app.sh
+# (4) AGENT_KEY_PATH 를 디렉토리로 변경
+sed -i 's|/api_keys/t_secret.key|/api_keys|' /etc/profile.d/agent-app.sh
 
-# (4) cron 라인에도 AGENT_KEY_PATH 가 명시되어 있으면 마찬가지로 수정
-#     (현재 setup.sh 의 cron 라인에는 KEY_PATH 가 안 들어가 있으므로 보통 불필요)
-sudo -u agent-admin crontab -l
-
-# (5) 재로그인 (profile 재로드) 후 부팅
-sudo -iu agent-admin bash -lc 'cd $AGENT_HOME && ./agent-app'
+# (5) 재로그인(=su -) 후 부팅 → profile 재로드
+su - agent-admin -c 'cd $AGENT_HOME && ./agent-app'
 ```
 
 ---
