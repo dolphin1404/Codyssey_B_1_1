@@ -2,24 +2,7 @@
 
 > 본 문서는 **교육장 Mac(일반 사용자, sudo 권한 없음)** 환경에서 Docker 컨테이너 안 Ubuntu 24.04 에 `agent-app` 을 배포하고, 보안·권한·환경·자동 모니터링까지 일관되게 셋업한 전체 과정을 기록합니다. 모든 명령과 그에 따른 출력은 실제 실행 결과입니다.
 >
-> 스크린샷은 `screenshots/` 폴더 안의 동일 파일명으로 본인 실습 후 넣으면 자동으로 표시됩니다.
 
----
-
-## 📁 산출물 구성
-
-| 파일 | 역할 |
-| --- | --- |
-| `setup.sh` | SSH·UFW·계정·그룹·ACL·환경변수·키파일·cron 까지 한 번에 프로비저닝 |
-| `monitor.sh` | **(필수)** 프로세스/포트/방화벽/자원 점검 + 로그 누적 + 회전 |
-| `report.sh` | **(보너스 1)** monitor.log 분석 → CPU/MEM/DISK 평균/최대/최소/샘플수 |
-| `log_retention.sh` | **(보너스 2)** 7일 경과 압축 + 30일 경과 삭제 |
-| `요구사항_수행_내역서.md` | 명령어 + 설정 기록 (전통적 보고서) |
-| `평가문항_답변.md` | 채점 5개 항목에 직접 답변 + 부록(Mac 실행 절차) |
-| `리뷰_요구사항_매핑.md` | 요구사항 vs 구현 매핑표 + 발견 버그 5건 |
-| `screenshots/` | 단계별 실행 결과 PNG (12장) |
-
----
 
 ## 1. 초기 환경 구축 (Mac + Docker)
 
@@ -120,8 +103,7 @@ root@codyssey:/root/work# bash setup.sh ./agent-app-linux-x86
 
 **실행 결과 — 12 단계 전체**
 
-![setup.sh 전체 실행](./screenshots/00-setup.png)
-
+<img width="1110" height="1094" alt="Screenshot 2026-05-25 at 8 45 32 PM" src="https://github.com/user-attachments/assets/d1d9dda4-e1ea-445f-b663-6477c1168a30" />
 > 각 단계의 세부 결과는 아래 §3 ~ §8 에서 단계별로 확인합니다.
 
 ---
@@ -147,12 +129,13 @@ root@codyssey:/# ss -tulnp | grep sshd
 
 **실행 결과**
 
-![SSH 설정 확인](./screenshots/01-ssh.png)
+<img width="671" height="224" alt="Screenshot 2026-05-25 at 8 47 34 PM" src="https://github.com/user-attachments/assets/19e18542-8beb-4b37-9633-7fda703fe779" />
+
 
 ### 3.2 UFW 방화벽 — 20022/tcp, 15034/tcp 만 허용
 
 ```bash
-root@codyssey:/# ufw status verbose
+root@codyssey:/# 
 # Status: active
 # Default: deny (incoming), allow (outgoing), deny (routed)
 # To                         Action      From
@@ -165,8 +148,7 @@ root@codyssey:/# ufw status verbose
 
 **실행 결과**
 
-![UFW 상태](./screenshots/02-ufw.png)
-
+<img width="412" height="199" alt="Screenshot 2026-05-25 at 8 47 59 PM" src="https://github.com/user-attachments/assets/3ac69f01-4ebb-4073-9dbd-43cd25233005" />
 ---
 
 ## 4. 사용자 / 그룹 / 권한 관리
@@ -194,7 +176,8 @@ root@codyssey:/# getent group agent-core
 
 **실행 결과**
 
-![계정 / 그룹](./screenshots/03-users-groups.png)
+<img width="737" height="160" alt="Screenshot 2026-05-25 at 8 49 25 PM" src="https://github.com/user-attachments/assets/ef29ae13-c468-490a-9b6b-e62dfcce0710" />
+
 
 ### 4.2 디렉토리 구조 + ACL 권한
 
@@ -224,7 +207,8 @@ root@codyssey:/# getfacl --absolute-names /var/log/agent-app
 
 **실행 결과**
 
-![디렉토리 + ACL](./screenshots/04-dirs-acl.png)
+<img width="693" height="591" alt="Screenshot 2026-05-25 at 8 50 39 PM" src="https://github.com/user-attachments/assets/452d9bfd-0dd9-4cb9-9b18-3c4e7f32fdba" />
+
 
 ### 4.3 음성/양성 검증 — 그룹 분리가 실제로 동작하는지
 
@@ -238,8 +222,8 @@ root@codyssey:/# su - agent-dev -c 'ls /home/agent-admin/agent-app/api_keys'
 # secret.key
 # t_secret.key
 ```
+<img width="608" height="61" alt="Screenshot 2026-05-25 at 8 56 29 PM" src="https://github.com/user-attachments/assets/2e1a0d55-c38e-4182-9cd1-50836cd1e416" />
 
-> 위 음성/양성 검증 결과도 [`04-dirs-acl.png`](./screenshots/04-dirs-acl.png) 에 함께 캡처됩니다.
 
 ---
 
@@ -264,11 +248,12 @@ root@codyssey:/# su - agent-admin -c 'env | grep ^AGENT_ | sort'
 # AGENT_UPLOAD_DIR=/home/agent-admin/agent-app/upload_files
 ```
 
-> ⚠️ 새 agent-app-linux 바이너리는 `AGENT_KEY_PATH` 를 **디렉토리** 로 기대합니다 (이전 spec 은 파일 경로). setup.sh 가 이 차이를 반영.
+> 새 agent-app-linux 바이너리는 `AGENT_KEY_PATH` 를 **디렉토리** 로 기대합니다 (이전 spec 은 파일 경로). setup.sh 가 이 차이를 반영.
 
 **실행 결과**
 
-![환경 변수](./screenshots/05-env.png)
+<img width="521" height="200" alt="Screenshot 2026-05-25 at 8 57 17 PM" src="https://github.com/user-attachments/assets/d4ff87de-f2bd-40e6-9e8d-a17205ea54d6" />
+
 
 ### 5.2 API 키 파일 (`secret.key`)
 
@@ -285,7 +270,8 @@ root@codyssey:/# cat /home/agent-admin/agent-app/api_keys/secret.key
 
 **실행 결과**
 
-![API 키 파일](./screenshots/06-key.png)
+<img width="567" height="119" alt="Screenshot 2026-05-25 at 8 58 07 PM" src="https://github.com/user-attachments/assets/30938b67-86d7-4c74-9425-4b1302001e00" />
+
 
 ---
 
@@ -316,7 +302,8 @@ Agent READY
 
 **실행 결과**
 
-![Boot Sequence](./screenshots/07-boot.png)
+<img width="572" height="211" alt="Screenshot 2026-05-25 at 8 59 48 PM" src="https://github.com/user-attachments/assets/c8512b7d-e782-4427-bc7c-ea0b6331a423" />
+
 
 ### 6.2 LISTEN 상태 확인
 
@@ -328,7 +315,8 @@ root@codyssey:/# pidof agent-app
 # 573 574
 ```
 
-> Boot Sequence + LISTEN 확인은 [`07-boot.png`](./screenshots/07-boot.png) 한 장에 함께 캡처합니다.
+<img width="705" height="46" alt="Screenshot 2026-05-25 at 9 01 02 PM" src="https://github.com/user-attachments/assets/c88dc459-6143-4d5e-a5a8-576f99446205" />
+<img width="291" height="29" alt="Screenshot 2026-05-25 at 9 01 48 PM" src="https://github.com/user-attachments/assets/d6a068f1-8fbe-4902-898d-b7f889f0219e" />
 
 ---
 
@@ -345,6 +333,8 @@ root@codyssey:/# ls -l /home/agent-admin/agent-app/bin/monitor.sh
 - 그룹: **agent-core** (admin·dev 만 실행 가능)
 - 권한: **750 (rwxr-x---)** — other 차단
 
+
+
 ### 7.2 monitor.sh 동작 요약
 
 | 단계 | 항목 | 실패 시 |
@@ -357,7 +347,7 @@ root@codyssey:/# ls -l /home/agent-admin/agent-app/bin/monitor.sh
 | Logging | `/var/log/agent-app/monitor.log` 에 append | — |
 | Rotate | 10MB 초과 시 `.1`~`.10` 시프트 | — |
 
-### 7.3 직접 실행 — happy path
+### 7.3 직접 실행
 
 ```bash
 root@codyssey:/# su - agent-admin -c '/home/agent-admin/agent-app/bin/monitor.sh'
@@ -384,7 +374,7 @@ DISK Used  : 2%
 
 **실행 결과**
 
-![monitor.sh happy path](./screenshots/08-monitor.png)
+<img width="670" height="268" alt="Screenshot 2026-05-25 at 9 02 50 PM" src="https://github.com/user-attachments/assets/9cd10d07-e793-4db8-a05b-d516f5acb465" />
 
 ### 7.4 FAIL path — 앱을 죽이면 exit 1
 
@@ -404,7 +394,7 @@ exit=1
 
 **실행 결과**
 
-![monitor.sh FAIL](./screenshots/12-monitor-fail.png)
+<img width="748" height="143" alt="Screenshot 2026-05-25 at 9 03 32 PM" src="https://github.com/user-attachments/assets/9434b5a3-1662-437d-b24a-5a2706761cb4" />
 
 ---
 
@@ -432,105 +422,16 @@ root@codyssey:/# tail -8 /var/log/agent-app/monitor.log
 
 **실행 결과**
 
-![cron 누적](./screenshots/09-cron.png)
+<img width="1117" height="171" alt="Screenshot 2026-05-25 at 9 04 22 PM" src="https://github.com/user-attachments/assets/42eca002-4f5e-4dc4-a851-c68aea570af9" />
 
 ---
 
-## 9. (보너스 1) report.sh — 통계 리포트
+## 11. 컨테이너 정리
 
 ```bash
-root@codyssey:/# su - agent-admin -c '/home/agent-admin/agent-app/bin/report.sh'
-```
-
-```
-====== STATISTICS REPORT ======
-  [CPU]
-    Average : 1.2%
-    Maximum : 2.1% at 2026-05-24 10:54:45
-    Minimum : 0.3% at 2026-05-24 10:56:02
-  [Memory]
-    Average : 15.1%
-    Maximum : 16.6% at 2026-05-24 10:54:45
-    Minimum : 13.8% at 2026-05-24 10:56:02
-  [Disk]
-    Average : 2.0%
-    Maximum : 2.0% at 2026-05-24 10:54:02
-    Minimum : 2.0% at 2026-05-24 10:54:02
-  [Samples]
-    Data Points: 5 samples
-```
-
-시간 구간 필터:
-```bash
-root@codyssey:/# su - agent-admin -c \
-  '/home/agent-admin/agent-app/bin/report.sh "2026-05-24 10:55:00" "2026-05-24 10:57:00"'
-```
-
-**실행 결과**
-
-![report.sh](./screenshots/10-report.png)
-
----
-
-## 10. (보너스 2) log_retention.sh — 시간 기반 보존 정책
-
-- 7일 경과 `*.log` → `/var/log/monitor/agent-app/archive/<원본>.<timestamp>.gz` 로 압축 이동
-- 30일 경과 `*.gz` → 삭제
-- 디렉토리 미존재 / 권한 부족 / 대상 0건 → `[WARNING]` 또는 `[INFO]` 출력 후 `exit 0` (안전 종료)
-
-```bash
-# 가짜 노화로 동작 검증
-root@codyssey:/# touch -d '8 days ago'  /var/log/agent-app/sample-old.log
-root@codyssey:/# mkdir -p /var/log/monitor/agent-app/archive
-root@codyssey:/# touch -d '31 days ago' /var/log/monitor/agent-app/archive/very-old.gz
-
-root@codyssey:/# /home/agent-admin/agent-app/bin/log_retention.sh
-# [2026-05-24 10:34:11] [INFO] compressed 1 file(s); 0 error(s)
-# [2026-05-24 10:34:11] [INFO] deleted 1 archive(s); 0 error(s)
-
-root@codyssey:/# ls -la /var/log/monitor/agent-app/archive/
-# sample-old.log.20260524-103411.gz
-```
-
-**실행 결과**
-
-![log_retention.sh](./screenshots/11-retention.png)
-
----
-
-## 11. 호스트(Mac)로 산출물 회수 + 컨테이너 정리
-
-```bash
-kyumin@MacBook Codyssey_B_1_1 % mkdir -p evidence
-kyumin@MacBook Codyssey_B_1_1 % docker exec codyssey crontab -u agent-admin -l        > evidence/09-cron.txt
-kyumin@MacBook Codyssey_B_1_1 % docker exec codyssey ss -tulnp                        > evidence/01-listen.txt
-kyumin@MacBook Codyssey_B_1_1 % docker exec codyssey ufw status verbose               > evidence/02-ufw.txt
-kyumin@MacBook Codyssey_B_1_1 % docker cp codyssey:/var/log/agent-app/monitor.log     evidence/monitor.log
-
 # 작업 끝나면
 kyumin@MacBook Codyssey_B_1_1 % docker stop codyssey && docker rm codyssey
 ```
-
----
-
-## 12. 검증 체크리스트 (요구사항 §8 기준)
-
-| # | 항목 | 결과 |
-| --- | --- | --- |
-| 1 | SSH 포트 20022 변경 + Root 원격 차단 | ✅ |
-| 2 | UFW 활성 + 20022/tcp · 15034/tcp 만 허용 | ✅ |
-| 3 | 계정 3개 + 그룹 2개 + 멤버십 정확 | ✅ |
-| 4 | 디렉토리 구조 + 권한/ACL 정확 | ✅ |
-| 5 | 환경 변수 5종 정상 노출 | ✅ |
-| 6 | 키 파일 내용 = `agent_api_key_test` | ✅ |
-| 7 | 앱 Boot 5/5 [OK] + Agent READY + LISTEN 0.0.0.0:15034 | ✅ |
-| 8 | monitor.sh 콘솔 출력 (Health/Resource/Threshold) | ✅ |
-| 9 | monitor.log 포맷 일치 + 매분 자동 누적 | ✅ |
-| 10 | Health Check 실패 시 exit 1 | ✅ |
-| 11 | (보너스) report.sh 통계 | ✅ |
-| 12 | (보너스) 7일/30일 보존 정책 | ✅ |
-
----
 
 ## 13. 학습 정리 (한 줄씩)
 
@@ -543,4 +444,3 @@ kyumin@MacBook Codyssey_B_1_1 % docker stop codyssey && docker rm codyssey
 
 ---
 
-*본 문서는 학습 및 동료 평가를 위해 작성된 실제 실행 로그입니다. 모든 스크린샷은 교육장 Mac → Docker(Ubuntu 24.04) 환경에서 직접 캡처되었습니다.*
