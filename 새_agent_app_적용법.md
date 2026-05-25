@@ -8,8 +8,8 @@
 
 | 파일 | 아키텍처 | 크기 | 용도 |
 | --- | --- | --- | --- |
-| `agent-app-linux-x86` | **x86-64 / amd64** (이름은 "x86" 이지만 실제로는 64-bit) | 6.2 MB | 일반 Intel/AMD 서버, Docker Desktop on Windows/WSL, EC2 m/c/r 계열, GCP n/e 계열 등 |
-| `agent-app-linux-arm64` | ARM64 / aarch64 | 7.2 MB | Apple Silicon Mac (M1~M4), AWS Graviton, Raspberry Pi 4/5, Ampere |
+| `agent-app-linux-x86` | **x86-64 / amd64** (이름은 "x86" 이지만 실제로는 64-bit) | 6.2 MB | **Intel Mac**, 일반 Intel/AMD 서버, EC2 m/c/r, GCP n/e 등 |
+| `agent-app-linux-arm64` | ARM64 / aarch64 | 7.2 MB | **Apple Silicon Mac (M1~M4)**, AWS Graviton, Raspberry Pi 4/5, Ampere |
 
 > `file` 명령으로 본 결과: x86 은 "ELF 64-bit LSB executable, x86-64, ... for GNU/Linux 3.2.0", arm64 는 "ELF 64-bit LSB executable, ARM aarch64, ... for GNU/Linux 3.7.0".
 > 어느 쪽이든 **glibc 2.35(=22.04) 에서 그대로 동작** — 이전 바이너리가 요구하던 glibc 2.38 (24.04+) 의존성이 사라졌습니다.
@@ -43,28 +43,38 @@ setup.sh 가 이미 위 3가지를 모두 반영하도록 패치되었습니다 
 
 ---
 
-## 3. 적용 절차 — 교육장 PC (Docker 컨테이너) 기준
+## 3. 적용 절차 — 교육장 Mac (Docker 컨테이너) 기준
 
-교육장 PC 는 일반 사용자 계정(sudo 없음)이므로, **호스트는 Docker 명령만 쓰고 미션은 컨테이너 안에서** 진행합니다.
+교육장 Mac 은 일반 사용자 계정(sudo 없음)이므로, **호스트(Mac)는 Docker 명령만, 미션은 컨테이너 안에서** 진행합니다. Apple Silicon / Intel Mac 분기 포함.
 
-### 3-A. 호스트 (Windows/macOS, sudo 불필요)
+### 3-A. 호스트 Mac (Terminal.app, sudo 불필요)
 
-```powershell
-cd C:\WorkSpace_2026\Codyssey_B_1_1     # 프로젝트 폴더
+```bash
+cd ~/path/to/Codyssey_B_1_1     # 프로젝트 폴더로 이동
 
-# 1) zip 풀고 본인 아키텍처의 바이너리만 같은 폴더에
-Expand-Archive 'C:\Users\…\Downloads\agent-app.zip' .\_zip -Force
-Copy-Item .\_zip\agent-app-linux-x86 .          # 또는 -arm64
+# 1) 내 Mac 아키텍처에 맞춰 PLATFORM / BIN 환경변수 자동 설정
+if [[ "$(uname -m)" == "arm64" ]]; then
+  export PLATFORM=linux/arm64 BIN=agent-app-linux-arm64       # Apple Silicon (M1~M4)
+else
+  export PLATFORM=linux/amd64 BIN=agent-app-linux-x86         # Intel Mac
+fi
+echo "PLATFORM=$PLATFORM  BIN=$BIN"
 
-# 2) Ubuntu 24.04 컨테이너 띄우기 (한 번만)
-docker pull ubuntu:24.04
-docker run -d --name codyssey --privileged --cgroupns=host `
-  --tmpfs /tmp:exec --tmpfs /run --tmpfs /run/lock `
-  -v /sys/fs/cgroup:/sys/fs/cgroup:rw `
-  -p 20022:20022 -p 15034:15034 `
+# 2) zip 풀고 본인 아키텍처의 바이너리만 작업 폴더로
+unzip -o ~/Downloads/agent-app.zip -d ~/Downloads/agent-app-extracted
+cp ~/Downloads/agent-app-extracted/$BIN ./$BIN
+chmod +x ./$BIN
+
+# 3) Ubuntu 24.04 컨테이너 띄우기 (한 번만)
+docker pull --platform=$PLATFORM ubuntu:24.04
+docker run -d --name codyssey --privileged --cgroupns=host \
+  --platform=$PLATFORM \
+  --tmpfs /tmp:exec --tmpfs /run --tmpfs /run/lock \
+  -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+  -p 20022:20022 -p 15034:15034 \
   ubuntu:24.04 sleep infinity
 
-# 3) 컨테이너 안 deps 설치 + 데몬 기동
+# 4) 컨테이너 안 deps 설치 + 데몬 기동
 docker exec codyssey bash -c '
   apt-get update && apt-get install -y --no-install-recommends \
     openssh-server ufw cron acl dos2unix iproute2 procps psmisc ca-certificates curl
@@ -72,15 +82,15 @@ docker exec codyssey bash -c '
   service ssh start ; service cron start
 '
 
-# 4) 파일들 docker cp 로 컨테이너 안으로
-docker cp .\monitor.sh         codyssey:/root/work/
-docker cp .\report.sh          codyssey:/root/work/
-docker cp .\log_retention.sh   codyssey:/root/work/
-docker cp .\setup.sh           codyssey:/root/work/
-docker cp .\agent-app-linux-x86 codyssey:/root/work/
+# 5) 파일들 docker cp 로 컨테이너 안으로
+docker cp ./monitor.sh        codyssey:/root/work/
+docker cp ./report.sh         codyssey:/root/work/
+docker cp ./log_retention.sh  codyssey:/root/work/
+docker cp ./setup.sh          codyssey:/root/work/
+docker cp ./$BIN              codyssey:/root/work/
 
-# 5) 라인엔딩 + 실행 비트 정리
-docker exec codyssey bash -c 'cd /root/work && dos2unix *.sh && chmod +x *.sh agent-app-linux-x86'
+# 6) 라인엔딩 + 실행 비트 정리
+docker exec codyssey bash -c "cd /root/work && dos2unix *.sh 2>/dev/null && chmod +x *.sh $BIN"
 ```
 
 ### 3-B. 컨테이너 안 (root 셸 — sudo 무관)
@@ -89,8 +99,9 @@ docker exec codyssey bash -c 'cd /root/work && dos2unix *.sh && chmod +x *.sh ag
 docker exec -it codyssey bash
 cd /root/work
 
-# 1) 일괄 프로비저닝 (setup.sh 가 받은 첫 인자를 ${AGENT_HOME}/agent-app 으로 install)
-bash setup.sh ./agent-app-linux-x86
+# 1) 일괄 프로비저닝 — Apple Silicon 이면 arm64, Intel Mac 이면 x86
+#    (setup.sh 가 받은 첫 인자를 $AGENT_HOME/agent-app 으로 자동 install)
+bash setup.sh ./agent-app-linux-arm64    # 또는 ./agent-app-linux-x86
 
 # 2) 앱 기동 (백그라운드)
 su - agent-admin -c 'cd $AGENT_HOME && ./agent-app' &
@@ -110,15 +121,15 @@ ufw status                                   # 방화벽 활성
 exit   # 컨테이너 셸 나오기
 ```
 
-### 3-C. 산출물 회수 + 정리
+### 3-C. 호스트(Mac)로 산출물 회수 + 정리
 
-```powershell
-# 컨테이너 안 로그/증거를 호스트로 회수
-docker exec codyssey crontab -u agent-admin -l        > evidence\09-cron.txt
-docker exec codyssey cat /var/log/agent-app/monitor.log > evidence\monitor.log
+```bash
+mkdir -p evidence
+docker exec codyssey crontab -u agent-admin -l          > evidence/09-cron.txt
+docker exec codyssey cat /var/log/agent-app/monitor.log > evidence/monitor.log
 
 # 작업 끝나면 정리
-docker stop codyssey ; docker rm codyssey
+docker stop codyssey && docker rm codyssey
 ```
 
 ### 핵심 포인트 — `setup.sh` 인자
@@ -130,29 +141,34 @@ docker stop codyssey ; docker rm codyssey
 
 ## 4. 이미 setup.sh 를 한 번 돌린 상태에서 새 바이너리로 갈아끼우기
 
-이전 바이너리로 한 번 설치했고 그 위에 새 바이너리를 덮어쓰는 경우 (컨테이너 안 root 셸에서, sudo 무관):
+이전 바이너리로 컨테이너를 이미 한 번 프로비저닝 했고, 그 위에 새 바이너리만 덮어쓰는 경우 (Mac 호스트 + 컨테이너 안, sudo 무관):
 
 ```bash
-# (1) 새 바이너리 docker cp 로 컨테이너 안에 가져온 뒤
-docker cp ./agent-app-linux-x86 codyssey:/root/agent-app-linux-x86
+# Mac 호스트에서: 새 바이너리 docker cp 로 컨테이너 안에 전달
+docker cp ./$BIN codyssey:/root/$BIN
 docker exec -it codyssey bash    # 컨테이너 진입
+```
 
-# (2) 새 바이너리 교체 (sudo 없이 — 이미 root)
+```bash
+# (컨테이너 안, root 셸)
+# (1) 새 바이너리 교체
 install -o agent-admin -g agent-core -m 750 \
-  /root/agent-app-linux-x86 \
+  /root/$BIN \
   /home/agent-admin/agent-app/agent-app
 
-# (3) 키 파일 이름 변경 (t_secret.key -> secret.key)
+# (2) 키 파일 이름 변경 (t_secret.key → secret.key)
 mv /home/agent-admin/agent-app/api_keys/t_secret.key \
    /home/agent-admin/agent-app/api_keys/secret.key
-ln -sf secret.key /home/agent-admin/agent-app/api_keys/t_secret.key  # 호환 심볼릭 링크
+ln -sf secret.key /home/agent-admin/agent-app/api_keys/t_secret.key   # 호환 심볼릭 링크
 
-# (4) AGENT_KEY_PATH 를 디렉토리로 변경
+# (3) AGENT_KEY_PATH 를 디렉토리로 변경
 sed -i 's|/api_keys/t_secret.key|/api_keys|' /etc/profile.d/agent-app.sh
 
-# (5) 재로그인(=su -) 후 부팅 → profile 재로드
+# (4) 재로그인(=su -) 으로 profile 재로드 후 부팅
 su - agent-admin -c 'cd $AGENT_HOME && ./agent-app'
 ```
+
+> 처음부터 다시 받는 게 더 깔끔하다면 `docker stop codyssey && docker rm codyssey` 한 뒤 §3 절차 다시.
 
 ---
 
