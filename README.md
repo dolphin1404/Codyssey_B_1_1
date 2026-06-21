@@ -1,43 +1,22 @@
 # B1-1: 시스템 관제 자동화 (Linux Monitor System)
 
-> 본 문서는 **교육장 Mac(일반 사용자, sudo 권한 없음)** 환경에서 Docker 컨테이너 안 Ubuntu 24.04 에 `agent-app` 을 배포하고, 보안·권한·환경·자동 모니터링까지 일관되게 셋업한 전체 과정을 기록합니다. 모든 명령과 그에 따른 출력은 실제 실행 결과이며, 각 단계마다 **"무엇을 했는가" + "왜 그렇게 했는가"** 를 함께 설명합니다.
-
----
-
 ## 1. 초기 환경 구축 (Mac + Docker)
 
-교육장 Mac은 일반 사용자 계정이라 sudo 권한이 없습니다. 따라서 **호스트(Mac)에서는 docker 명령만**, 미션 본 작업(useradd, ufw, /var/log 등)은 모두 **컨테이너 안 root 셸**에서 수행합니다.
-
-### 1.1 아키텍처 자동 매칭 (Apple Silicon vs Intel Mac)
+### 1.1 zip 풀고 본인 아키텍처 바이너리만 작업 폴더로
 
 ```bash
-kyumin@MacBook Codyssey_B_1_1 % uname -m
-# arm64   → Apple Silicon (M1~M4)
-# x86_64  → Intel Mac
-
-kyumin@MacBook Codyssey_B_1_1 % if [[ "$(uname -m)" == "arm64" ]]; then
-  export PLATFORM=linux/arm64 BIN=agent-app-linux-arm64
-else
-  export PLATFORM=linux/amd64 BIN=agent-app-linux-x86
-fi
-kyumin@MacBook Codyssey_B_1_1 % echo "PLATFORM=$PLATFORM  BIN=$BIN"
+kyumin14040659@c6r10s7 Codyssey_B_1_1 % unzip -o ~/Downloads/agent-app.zip -d ~/Downloads/agent-app-extracted
+kyumin14040659@c6r10s7 Codyssey_B_1_1 % cp ~/Downloads/agent-app-extracted/$BIN ./$BIN
+kyumin14040659@c6r10s7 Codyssey_B_1_1 % chmod +x ./$BIN
+kyumin14040659@c6r10s7 Codyssey_B_1_1 % ls -lh $BIN
 ```
 
-### 1.2 zip 풀고 본인 아키텍처 바이너리만 작업 폴더로
+### 1.2 Ubuntu 24.04 컨테이너 생성 및 실행
 
 ```bash
-kyumin@MacBook Codyssey_B_1_1 % unzip -o ~/Downloads/agent-app.zip -d ~/Downloads/agent-app-extracted
-kyumin@MacBook Codyssey_B_1_1 % cp ~/Downloads/agent-app-extracted/$BIN ./$BIN
-kyumin@MacBook Codyssey_B_1_1 % chmod +x ./$BIN
-kyumin@MacBook Codyssey_B_1_1 % ls -lh $BIN
-```
+kyumin14040659@c6r10s7 Codyssey_B_1_1 % docker pull --platform=$PLATFORM ubuntu:24.04
 
-### 1.3 Ubuntu 24.04 컨테이너 생성 및 실행
-
-```bash
-kyumin@MacBook Codyssey_B_1_1 % docker pull --platform=$PLATFORM ubuntu:24.04
-
-kyumin@MacBook Codyssey_B_1_1 % docker run -d --name codyssey --privileged --cgroupns=host \
+kyumin14040659@c6r10s7 Codyssey_B_1_1 % docker run -d --name codyssey --privileged --cgroupns=host \
   --platform=$PLATFORM \
   --tmpfs /tmp:exec --tmpfs /run --tmpfs /run/lock \
   -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
@@ -49,10 +28,10 @@ kyumin@MacBook Codyssey_B_1_1 % docker run -d --name codyssey --privileged --cgr
 > - `--tmpfs /tmp:exec` — PyInstaller 가 `/tmp` 에 lib 펼치고 실행해야 하므로 `exec` 옵션
 > - `-p 20022:20022 -p 15034:15034` — Mac 호스트에서 직접 SSH·앱 접근 가능
 
-### 1.4 필수 패키지 설치 + 데몬 기동
+### 1.3 필수 패키지 설치 + 데몬 기동
 
 ```bash
-kyumin@MacBook Codyssey_B_1_1 % docker exec codyssey bash -c '
+kyumin14040659@c6r10s7 Codyssey_B_1_1 % docker exec codyssey bash -c '
   apt-get update
   apt-get install -y --no-install-recommends \
     openssh-server ufw cron acl dos2unix \
@@ -63,16 +42,16 @@ kyumin@MacBook Codyssey_B_1_1 % docker exec codyssey bash -c '
 '
 ```
 
-### 1.5 스크립트 + 바이너리 docker cp
+### 1.4 스크립트 + 바이너리 docker cp
 
 ```bash
-kyumin@MacBook Codyssey_B_1_1 % docker cp ./monitor.sh        codyssey:/root/work/
-kyumin@MacBook Codyssey_B_1_1 % docker cp ./report.sh         codyssey:/root/work/
-kyumin@MacBook Codyssey_B_1_1 % docker cp ./log_retention.sh  codyssey:/root/work/
-kyumin@MacBook Codyssey_B_1_1 % docker cp ./setup.sh          codyssey:/root/work/
-kyumin@MacBook Codyssey_B_1_1 % docker cp ./$BIN              codyssey:/root/work/
+kyumin14040659@c6r10s7 Codyssey_B_1_1 % docker cp ./monitor.sh        codyssey:/root/work/
+kyumin14040659@c6r10s7 Codyssey_B_1_1 % docker cp ./report.sh         codyssey:/root/work/
+kyumin14040659@c6r10s7 Codyssey_B_1_1 % docker cp ./log_retention.sh  codyssey:/root/work/
+kyumin14040659@c6r10s7 Codyssey_B_1_1 % docker cp ./setup.sh          codyssey:/root/work/
+kyumin14040659@c6r10s7 Codyssey_B_1_1 % docker cp ./$BIN              codyssey:/root/work/
 
-kyumin@MacBook Codyssey_B_1_1 % docker exec codyssey bash -c "
+kyumin14040659@c6r10s7 Codyssey_B_1_1 % docker exec codyssey bash -c "
   cd /root/work
   dos2unix *.sh 2>/dev/null
   chmod +x *.sh $BIN
@@ -80,10 +59,10 @@ kyumin@MacBook Codyssey_B_1_1 % docker exec codyssey bash -c "
 "
 ```
 
-### 1.6 컨테이너 안 root 셸 진입
+### 1.5 컨테이너 안 root 셸 진입
 
 ```bash
-kyumin@MacBook Codyssey_B_1_1 % docker exec -it codyssey bash
+kyumin14040659@c6r10s7 Codyssey_B_1_1 % docker exec -it codyssey bash
 root@codyssey:/# cd /root/work
 root@codyssey:/root/work#
 ```
@@ -634,7 +613,7 @@ echo "third" >> a.txt    # a.txt = "second\nthird"    ← 누적 (추가)
 
 ```bash
 # 작업 끝나면
-kyumin@MacBook Codyssey_B_1_1 % docker stop codyssey && docker rm codyssey
+kyumin14040659@c6r10s7 Codyssey_B_1_1 % docker stop codyssey && docker rm codyssey
 ```
 
 ---
@@ -653,5 +632,3 @@ kyumin@MacBook Codyssey_B_1_1 % docker stop codyssey && docker rm codyssey
 - **로그 보존 정책**: 7일 = 진행 중 인시던트 즉시 가용성, 30일 = 주간/월간 회고. 그 이상은 비용 대비 가치 급감 → 자동 삭제.
 
 ---
-
-*본 문서는 학습 및 동료 평가를 위해 작성된 실제 실행 로그입니다. 모든 스크린샷은 교육장 Mac → Docker(Ubuntu 24.04) 환경에서 직접 캡처되었습니다.*
