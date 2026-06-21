@@ -2,14 +2,31 @@
 
 ## 1. 초기 환경 구축 (Mac + Docker)
 
-### 1.1 zip 풀고 본인 아키텍처 바이너리만 작업 폴더로
+### 1.1 내 Mac 아키텍처 확인 + zip 풀기
+
+> ⚠️ **가장 흔한 실수**: 내 Mac arch 와 다른 바이너리를 쓰면 나중에 `./agent-app` 실행 시
+> `No such file or directory` 가 뜹니다(파일은 있는데 ELF 인터프리터가 없어서). 그래서 먼저 arch 를 잡고 시작합니다.
 
 ```bash
+# 1) 내 Mac 아키텍처 확인 → 맞는 바이너리/플랫폼을 변수로 고정
+kyumin14040659@c6r10s7 Codyssey_B_1_1 % uname -m
+# arm64  → Apple Silicon (M1~M4)   / x86_64 → Intel Mac
+
+kyumin14040659@c6r10s7 Codyssey_B_1_1 % if [[ "$(uname -m)" == "arm64" ]]; then
+  export PLATFORM=linux/arm64 BIN=agent-app-linux-arm64
+else
+  export PLATFORM=linux/amd64 BIN=agent-app-linux-x86
+fi
+kyumin14040659@c6r10s7 Codyssey_B_1_1 % echo "PLATFORM=$PLATFORM  BIN=$BIN"
+
+# 2) zip 풀고 내 arch 바이너리만 작업 폴더로
 kyumin14040659@c6r10s7 Codyssey_B_1_1 % unzip -o ~/Downloads/agent-app.zip -d ~/Downloads/agent-app-extracted
 kyumin14040659@c6r10s7 Codyssey_B_1_1 % cp ~/Downloads/agent-app-extracted/$BIN ./$BIN
 kyumin14040659@c6r10s7 Codyssey_B_1_1 % chmod +x ./$BIN
 kyumin14040659@c6r10s7 Codyssey_B_1_1 % ls -lh $BIN
 ```
+
+> `$PLATFORM` · `$BIN` 은 **이 호스트(Mac) 터미널 세션에서만** 유효합니다. 아래 §1.2~§1.4 의 호스트 명령에서 그대로 쓰이고, 컨테이너 안(§2)에서는 setup.sh 가 arch 를 **자동 감지**하므로 변수를 다시 쓸 필요가 없습니다.
 
 ### 1.2 Ubuntu 24.04 컨테이너 생성 및 실행
 
@@ -76,8 +93,22 @@ root@codyssey:/root/work#
 본 프로젝트는 `setup.sh` 하나로 **SSH·UFW·계정·그룹·ACL·환경변수·키파일·cron 12 단계를 한 번에** 구성합니다. (수동 명령으로 풀어보고 싶다면 `요구사항_수행_내역서.md` 의 §1~§5 참고)
 
 ```bash
-root@codyssey:/root/work# bash setup.sh ./agent-app-linux-x86
-# (Apple Silicon 이면 ./agent-app-linux-arm64)
+# 인자 없이 실행하면 setup.sh 가 /root/work 안의 agent-app-linux-* 중
+# 현재 컨테이너 arch 에 맞는 바이너리를 "자동 감지"해 설치합니다.
+root@codyssey:/root/work# bash setup.sh
+#   ==> 9. Application binary -> /home/agent-admin/agent-app/agent-app
+#       installing: agent-app-linux-x86  (host arch: x86_64)
+# (특정 파일을 강제하려면)  bash setup.sh ./agent-app-linux-arm64
+```
+
+> 바이너리를 못 찾으면 setup.sh 가 조용히 넘어가지 않고 **`[ERROR] ... exit 1`** 로 즉시 멈춥니다. arch 가 안 맞으면 **`[WARNING] arch byte ... may not match`** 로 알려줍니다. (예전 버전은 경고만 찍고 넘어가 §6 에서 `No such file or directory` 가 났습니다 — 지금은 방지됨)
+
+**설치 직후 반드시 확인** — 이 한 줄이 §6 의 `No such file or directory` 를 미리 잡아줍니다.
+
+```bash
+root@codyssey:/root/work# ls -l /home/agent-admin/agent-app/agent-app
+# -rwxr-x--- 1 agent-admin agent-core 6498144 ... /home/agent-admin/agent-app/agent-app
+#   ↑ 이 파일이 보여야 정상. 안 보이면 위 setup.sh 가 바이너리를 설치 못 한 것.
 ```
 
 **실행 결과 — 12 단계 전체**
@@ -277,6 +308,21 @@ root@codyssey:/# cat /home/agent-admin/agent-app/api_keys/secret.key
 ---
 
 ## 6. 애플리케이션 실행 (agent-app)
+
+> ⚠️ **`./agent-app: No such file or directory` 가 뜬다면** — 파일 경로가 맞아도 이 에러가 날 수 있습니다. 원인은 둘 중 하나:
+>
+> | 에러 메시지 | 원인 | 해결 |
+> | --- | --- | --- |
+> | `bash: ./agent-app: No such file or directory` | **바이너리 미설치** — setup.sh 가 못 찾고 넘어감 | `ls -l $AGENT_HOME/agent-app` 로 확인 후, `cd /root/work && bash setup.sh` 재실행 |
+> | `Could not open '/lib/ld-linux-...so': No such file or directory` | **arch 불일치** — 컨테이너 arch ≠ 바이너리 arch | 컨테이너를 내 Mac arch(`--platform`)로 다시 만들고, 같은 arch 바이너리로 `bash setup.sh` |
+>
+> **3줄 진단** (컨테이너 안에서):
+> ```bash
+> root@codyssey:/# ls -l /home/agent-admin/agent-app/agent-app   # ① 파일이 있나? (없으면 미설치)
+> root@codyssey:/# head -c4 /home/agent-admin/agent-app/agent-app | xxd   # ELF 매직(7f 45 4c 46) 확인
+> root@codyssey:/# su - agent-admin -c 'echo $AGENT_HOME'         # ② 빈 값이면 profile.d 미로드
+> ```
+> setup.sh 를 최신본으로 다시 받았다면 자동 감지 + arch 검증이 들어가 있어 이 에러는 거의 사라집니다(§2 참고).
 
 ### 6.1 Boot Sequence 5/5 + "Agent READY"
 
