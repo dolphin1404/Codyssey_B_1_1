@@ -24,7 +24,7 @@ COMMON_GRP=agent-common
 CORE_GRP=agent-core
 AGENT_HOME="/home/${ADMIN_USER}/agent-app"
 LOG_DIR="/var/log/agent-app"
-APP_BIN_SRC="${1:-./agent-app}"
+APP_BIN_SRC="${1:-}"      # optional; auto-detected below if not given
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROFILE="/etc/profile.d/agent-app.sh"
@@ -148,13 +148,58 @@ chmod 640 "$KEY"
 ln -sf secret.key "${AGENT_HOME}/api_keys/t_secret.key" 2>/dev/null || true
 
 # ---------- 9. Application binary ----------
-step "9. Application binary: ${APP_BIN_SRC} -> ${AGENT_HOME}/agent-app"
-if [ -f "$APP_BIN_SRC" ]; then
-  install -o "$ADMIN_USER" -g "$CORE_GRP" -m 750 "$APP_BIN_SRC" "${AGENT_HOME}/agent-app"
-else
-  echo "    [WARNING] $APP_BIN_SRC not found; copy it manually:"
-  echo "        sudo install -o $ADMIN_USER -g $CORE_GRP -m 750 <path>/agent-app ${AGENT_HOME}/agent-app"
+# Pick the binary to install:
+#   1) explicit arg if given and it exists
+#   2) else auto-detect by this host's architecture (agent-app-linux-{arm64,x86})
+#   3) else any agent-app-linux-* / agent-app in the script dir
+# A wrong-arch binary fails at runtime with a misleading "No such file or directory"
+# (missing ELF interpreter), so we MATCH ARCH here and hard-fail if none is found.
+step "9. Application binary -> ${AGENT_HOME}/agent-app"
+
+ARCH="$(uname -m)"
+case "$ARCH" in
+  aarch64|arm64) WANT="agent-app-linux-arm64" ;;
+  x86_64|amd64)  WANT="agent-app-linux-x86"   ;;
+  *)             WANT="" ;;
+esac
+
+BIN=""
+if [ -n "$APP_BIN_SRC" ] && [ -f "$APP_BIN_SRC" ]; then
+  BIN="$APP_BIN_SRC"                                   # explicit arg wins
+elif [ -n "$WANT" ] && [ -f "${SCRIPT_DIR}/${WANT}" ]; then
+  BIN="${SCRIPT_DIR}/${WANT}"                          # arch-matched auto-detect
+else                                                    # last resort: anything plausible
+  for cand in "${SCRIPT_DIR}/${WANT}" "${SCRIPT_DIR}"/agent-app-linux-* "${SCRIPT_DIR}/agent-app"; do
+    [ -f "$cand" ] && { BIN="$cand"; break; }
+  done
 fi
+
+if [ -z "$BIN" ]; then
+  echo "[ERROR] agent-app binary not found." >&2
+  echo "        Host arch is '${ARCH}' (expected file: ${WANT:-agent-app-linux-*})." >&2
+  echo "        Put the matching binary next to setup.sh, then re-run:" >&2
+  echo "          bash setup.sh ./${WANT:-agent-app-linux-x86}" >&2
+  exit 1
+fi
+
+echo "    installing: $(basename "$BIN")  (host arch: ${ARCH})"
+install -o "$ADMIN_USER" -g "$CORE_GRP" -m 750 "$BIN" "${AGENT_HOME}/agent-app"
+
+# Sanity: confirm the ELF actually matches this host (catches arch mismatch now,
+# not later at boot). 'No such file or directory' on a present file == wrong arch.
+if ! head -c4 "${AGENT_HOME}/agent-app" | grep -q $'\x7fELF'; then
+  echo "[ERROR] installed agent-app is not an ELF binary." >&2; exit 1
+fi
+elf_arch_byte="$(od -An -t u1 -j18 -N1 "${AGENT_HOME}/agent-app" | tr -d ' ')"
+#   e_machine LSB: 62 = x86-64, 183 = AArch64
+case "$ARCH:$elf_arch_byte" in
+  x86_64:62|amd64:62|aarch64:183|arm64:183) : ;;   # match → OK
+  *)
+    echo "[WARNING] agent-app arch byte ($elf_arch_byte) may not match host ($ARCH)." >&2
+    echo "          If boot fails with 'No such file or directory', install the other binary:" >&2
+    echo "            bash setup.sh ./${WANT:-agent-app-linux-arm64}" >&2
+    ;;
+esac
 
 # ---------- 10. Environment variables ----------
 step "10. Env vars: ${PROFILE}"
